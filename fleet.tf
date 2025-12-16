@@ -1,7 +1,3 @@
-locals {
-  fleet_name = coalesce(var.fleet_name, "fleet-example-${random_string.suffix.result}")
-}
-
 # Fleet Resource
 resource "azapi_resource" "fleet" {
   type      = "Microsoft.ContainerService/fleets@2025-03-01"
@@ -19,9 +15,45 @@ resource "azapi_resource" "fleet" {
         apiServerAccessProfile = {
           enablePrivateCluster = true
           enableVnetIntegration = true
-          subnetId = azurerm_subnet.fleet-hub-apiserver.id
+          subnetId = azurerm_subnet.fleet-hub-apiserver-subnet.id
         }
         dnsPrefix = local.fleet_name
+      }
+    }
+  }
+
+  identity {
+    type = "UserAssigned"
+    identity_ids = [azurerm_user_assigned_identity.fleet_user_assigned_identity.id]
+  }
+
+  depends_on = [
+    azurerm_resource_group.fleet_rg,
+    azurerm_role_assignment.fleet_identity_01_network_contributor, 
+    azurerm_user_assigned_identity.fleet_user_assigned_identity, 
+    azurerm_role_assignment.fleet_user_assign_id_api_subnet_network_contributor,
+    azurerm_role_assignment.fleet_user_assign_id_hub_subnet_network_contributor
+  ]
+}
+
+# Fleet Resource
+resource "azapi_resource" "fleet-public" {
+  type      = "Microsoft.ContainerService/fleets@2025-03-01"
+  name      = "${local.fleet_name}-pub"
+  location  = azurerm_resource_group.fleet_rg.location
+  parent_id = azurerm_resource_group.fleet_rg.id
+
+  body = {
+    properties = {
+      hubProfile = {
+        agentProfile = {
+          vmSize = var.hub_cluster_vm_size
+        }
+        apiServerAccessProfile = {
+          enablePrivateCluster = false
+          enableVnetIntegration = false
+        }
+        dnsPrefix = "${local.fleet_name}-pub"
       }
     }
   }
@@ -30,20 +62,11 @@ resource "azapi_resource" "fleet" {
     type = "SystemAssigned"
   }
 
-  tags = var.tags
-
-  depends_on = [azurerm_resource_group.fleet_rg,azurerm_role_assignment.fleet_identity_01_network_contributor]
+  depends_on = [
+    azurerm_resource_group.fleet_rg
+  ]
 }
 
-
-resource "azurerm_role_assignment" "fleet_identity_01_network_contributor" {
-  scope                = azurerm_subnet.hub-cluster-subnet.id
-  role_definition_name = "Network Contributor"
-  principal_id         = "609d2f62-527f-4451-bfd2-ac2c7850822c" # Azure Kubernetes Service - Fleet RP
-  principal_type       = "ServicePrincipal"
-
-  depends_on = [azurerm_subnet.hub-cluster-subnet] #, azurerm_role_assignment.fleet_identity_network_contributor]
-}
 
 # Fleet Memberships
 # resource "azapi_resource" "fleet_members" {
